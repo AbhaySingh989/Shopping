@@ -59,13 +59,12 @@ def scrape_amazon(query: str, pincode: str) -> dict:
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--log-level=3")
-    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+    # options.add_experimental_option('excludeSwitches', ['enable-logging']) # Removed as requested
 
     driver = None  # Initialize driver to None
     try:
         print("Amazon: Initializing undetected-chromedriver...")
-        # version_main might need to be adjusted or removed if uc handles auto-detection well.
-        driver = uc.Chrome(options=options, use_subprocess=True, version_main=120)
+        driver = uc.Chrome(options=options, use_subprocess=True) # Removed version_main
         wait = WebDriverWait(driver, 10)
         print("Amazon: WebDriver initialized.")
 
@@ -237,14 +236,13 @@ def scrape_flipkart(query: str, pincode: str) -> dict:
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--log-level=3")
-    options.add_experimental_option('excludeSwitches', ['enable-logging'])
+    # options.add_experimental_option('excludeSwitches', ['enable-logging']) # Removed as requested
 
     driver = None
     try:
         print("Flipkart: Initializing undetected-chromedriver...")
-        driver = uc.Chrome(options=options, use_subprocess=True, version_main=120)
+        driver = uc.Chrome(options=options, use_subprocess=True) # Removed version_main
         wait = WebDriverWait(driver, 10)
-        # short_wait = WebDriverWait(driver, 5) # Already defined, but ensure it's used appropriately
         print("Flipkart: WebDriver initialized.")
 
         driver.get("https://www.flipkart.com")
