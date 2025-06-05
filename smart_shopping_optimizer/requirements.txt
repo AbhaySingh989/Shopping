@@ -1,0 +1,5 @@
+google-generativeai
+selenium
+webdriver_manager
+beautifulsoup4
+python-dotenv
