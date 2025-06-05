@@ -3,3 +3,4 @@ selenium
 webdriver_manager
 beautifulsoup4
 python-dotenv
+undetected-chromedriver

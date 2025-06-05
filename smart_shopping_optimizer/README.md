@@ -68,9 +68,9 @@ The agent follows these steps to provide a price comparison:
 *   **Programming Language:** Python 3.x
 *   **Large Language Model (LLM):** Google Gemini 1.5 Flash (via `google-generativeai` library) for query standardization.
 *   **Web Scraping & Automation:**
-    *   **Selenium (`selenium` library):** For browser automation, navigating websites, and interacting with web elements.
-    *   **WebDriver Manager (`webdriver_manager` library):** To automatically manage browser drivers (e.g., ChromeDriver for Chrome).
-    *   **BeautifulSoup4 (`beautifulsoup4` library):** For parsing HTML content obtained by Selenium, making data extraction easier.
+    *   **Selenium (`selenium` library):** For browser automation.
+    *   **Undetected ChromeDriver (`undetected-chromedriver` library):** Powers Selenium with a ChromeDriver that is less prone to detection by websites. It typically manages its own driver versioning.
+    *   **BeautifulSoup4 (`beautifulsoup4` library):** For parsing HTML content.
 *   **Environment Management:**
     *   **python-dotenv (`python-dotenv` library):** For managing API keys and other configurations securely in a `.env` file.
 *   **Development Environment:** A standard Python environment with `pip` for package management.
@@ -119,7 +119,7 @@ Follow these instructions to set up and run the Smart Shopping List Optimizer on
    ```bash
    pip install -r requirements.txt
    ```
-   This will install `google-generativeai`, `selenium`, `webdriver_manager`, `beautifulsoup4`, and `python-dotenv`.
+   This command installs all libraries listed in `requirements.txt`, including `google-generativeai`, `selenium`, `undetected-chromedriver`, `beautifulsoup4`, and `python-dotenv`.
 
 **Step 4: Set Up Environment Variables (.env file)**
    The agent needs your Gemini API Key to function.
@@ -156,10 +156,15 @@ Follow these instructions to set up and run the Smart Shopping List Optimizer on
 **Troubleshooting Common Issues:**
 *   **`ValueError: GEMINI_API_KEY not found in .env file.`**: Ensure you've created the `.env` file correctly, copied the content from `.env.example`, and replaced the placeholder with your actual API key. Make sure the file is named exactly `.env` (not `.env.txt`).
 *   **Selenium/WebDriver Errors (e.g., `WebDriverException`, `SessionNotCreatedException`)**:
-    *   Ensure Google Chrome is installed and up to date. `webdriver_manager` should handle driver compatibility, but sometimes issues can occur.
+    *   Ensure Google Chrome is installed and up to date.
     *   Make sure no antivirus or firewall is blocking WebDriver's operation.
     *   On some systems, especially Linux servers or Docker containers, you might need to install additional dependencies for headless Chrome.
+*   **`undetected-chromedriver` specific issues**:
+    *   **Chrome Version Mismatches**: `undetected-chromedriver` tries to download the correct driver for your installed Chrome version. If you update Chrome, `uc` might need to re-download a new driver on the next run. This is usually automatic.
+    *   **Antivirus/Firewall**: Ensure your security software isn't blocking `undetected-chromedriver` or the Chrome instances it launches.
+    *   **Profile Issues**: `uc` sometimes uses existing Chrome profiles or creates temporary ones. If you face persistent issues, try running after closing all other Chrome instances.
 *   **Scraping Failures (Product "Not Found" or "Error")**:
+    *   The agent now has more detailed logging. Check the console output for messages from "Amazon:" and "Flipkart:" prefixes to understand at what stage (pincode, search, item processing, relevance check, etc.) the issue occurred. This can help identify if it's a selector issue, network problem, or an anti-scraping measure.
     *   E-commerce websites change their layout frequently. The selectors used for scraping might become outdated. This is a common challenge with web scraping.
     *   The product might genuinely not be available on one or both platforms.
     *   Your internet connection might be unstable, or the websites might be temporarily blocking automated requests (though the agent uses some basic measures to appear like a regular user).
