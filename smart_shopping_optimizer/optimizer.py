@@ -9,6 +9,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException # Import TimeoutException
 from bs4 import BeautifulSoup
 import time
 import random
@@ -16,6 +17,52 @@ import random
 
 # Main script for the Smart Shopping Optimizer
 # This script will orchestrate the web scraping, LLM interaction, and user interface.
+
+def is_product_relevant_gemini(search_query: str, product_title: str, api_key: str, product_description: str = None) -> bool:
+    """
+    Uses Gemini API to determine if a product title (and optionally description)
+    is relevant to the user's original search query.
+
+    Args:
+        search_query (str): The user's search query (original or standardized).
+        product_title (str): The product title found on the e-commerce site.
+        api_key (str): The Gemini API key (used here for consistency, though genai might be pre-configured).
+        product_description (str, optional): Product description. Defaults to None.
+
+    Returns:
+        bool: True if the product is deemed relevant, False otherwise or if an error occurs.
+    """
+    # Ensure genai is configured. If get_standardized_query was called, it is.
+    # If not, this would be a good place for:
+    # if not genai.get_model('gemini-1.5-flash'): # Basic check, might need more robust way to check config
+    # genai.configure(api_key=api_key)
+
+    prompt_parts = [
+        "You are a product relevance evaluator for an e-commerce price comparison tool.",
+        "User's search query:", search_query, # Changed from "User's original search query" for clarity
+        "Product title found on website:", product_title,
+    ]
+    if product_description:
+        prompt_parts.extend(["Product description (if available):", product_description])
+
+    prompt_parts.append(
+        "Based on the product title (and description, if provided), "
+        "is this product a relevant match for the user's search query? "
+        "Answer with only 'yes' or 'no'."
+    )
+    prompt = "\n".join(prompt_parts)
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+
+        gemini_response_text = response.text.strip().lower()
+        print(f"Gemini relevance check for '{product_title}' (Query: '{search_query}'): Response: '{gemini_response_text}'")
+
+        return gemini_response_text == "yes"
+    except Exception as e:
+        print(f"Gemini API error during relevance check for title '{product_title}': {e}")
+        return False # Fallback to not relevant on error
 
 def load_environment_variables() -> tuple[str, str]:
     """
@@ -38,19 +85,20 @@ def load_environment_variables() -> tuple[str, str]:
 
     return api_key, default_pincode
 
-def scrape_amazon(query: str, pincode: str) -> dict:
+def scrape_amazon(search_query: str, pincode: str, api_key: str) -> dict: # Renamed query to search_query for clarity, added api_key
     """
     Scrapes Amazon.in for a given product query and pincode.
 
     Args:
-        query (str): The product search query.
+        search_query (str): The product search query (standardized by Gemini).
         pincode (str): The delivery pincode.
+        api_key (str): The Gemini API key for relevance checking.
 
     Returns:
         dict: A dictionary containing product title, price, URL, and status.
               Returns "Not found" or "Error" status if issues occur.
     """
-    print(f"Starting Amazon scrape for query: '{query}' with pincode: {pincode}")
+    print(f"Starting Amazon scrape for query: '{search_query}' with pincode: {pincode}") # Use search_query
     options = webdriver.ChromeOptions()
     options.add_argument("--headless")
     options.add_argument("--window-size=1920,1080")
@@ -140,40 +188,74 @@ def scrape_amazon(query: str, pincode: str) -> dict:
             title, price, url = "Not found", "N/A", "N/A"
             print(f"Amazon: Processing item {i+1}")
 
-            # TITLE Extraction
-            title_element = item.select_one('h2 a.a-link-normal span.a-text-normal')
+            # --- TITLE Extraction (New Approach) ---
+            title = "Not found" # Reset for each item
+            title_element = item.select_one('h2 span.a-text-normal.a-size-medium, h2 span.a-text-normal.a-size-base-plus') # Common combination
             if not title_element:
-                title_element = item.select_one('span.a-size-medium.a-color-base.a-text-normal')
+                # Try a slightly more general approach if specific size classes fail
+                title_element = item.select_one('h2 span.a-text-normal')
             if not title_element:
-                title_element = item.select_one('span.a-size-base-plus.a-color-base.a-text-normal')
-            if title_element:
+                # Check for titles within a link, often an A tag directly child of H2
+                h2_link_title = item.select_one('h2 > a > span[dir="auto"]') # Using dir="auto" which is sometimes seen
+                if h2_link_title:
+                    title_element = h2_link_title
+            if not title_element:
+                # Look for any prominent text within an H2, trying to avoid "Sponsored" labels
+                h2_elements = item.select('h2')
+                for h2_candidate in h2_elements:
+                    # Check if this h2 contains "Sponsored" or is part of a sponsored display, skip if so
+                    if h2_candidate.find_parent("div", class_=["s-sponsored-result-item", "AdHolder"]) : # Example classes for sponsored
+                        continue
+                    potential_title = h2_candidate.get_text(strip=True, separator=' ')
+                    # Further clean up if it contains "Sponsored" or other noise explicitly
+                    if "sponsored" not in potential_title.lower() and len(potential_title) > 10: # Basic length check
+                        title = potential_title # This is a broad catch-all
+                        break # Take the first non-sponsored H2 text
+                if title != "Not found": # If found via H2 broad search
+                    pass # Title is already set
+                elif title_element: # If found by previous specific selectors
+                    title = title_element.get_text(strip=True)
+            elif title_element: # If found by primary selectors
                 title = title_element.get_text(strip=True)
-            else:
-                print(f"Amazon: Title not found for item {i+1}")
 
-            # PRICE Extraction
+            if title == "Not found":
+                print(f"Amazon: Title still not found for item {i+1} using new selectors.")
+                # As a last resort, dump part of the item's HTML for debugging
+                # print(f"Amazon: Item HTML snippet for failed title: {item.prettify()[:1000]}")
+            else:
+                # Clean up title if it contains "Sponsored" from a bad catch
+                if "sponsored" in title.lower() and len(title.split()) > 5: # Avoid removing title if it's just "Sponsored Ad"
+                    parts = title.split("Sponsored")
+                    title = parts[-1].strip() if len(parts) > 1 else parts[0].strip()
+            # --- End of TITLE Extraction ---
+
+            # PRICE Extraction (existing logic)
+            price_str_for_log = "N/A" # Placeholder for logging before actual price extraction
             price_whole_element = item.select_one('span.a-price-whole')
             price_fraction_element = item.select_one('span.a-price-fraction')
             if price_whole_element:
-                price = price_whole_element.get_text(strip=True).replace(",", "") # Remove comma for consistency
+                price = price_whole_element.get_text(strip=True).replace(",", "")
                 if price_fraction_element:
-                    price += "." + price_fraction_element.get_text(strip=True) # Add fraction as decimal part
+                    price += "." + price_fraction_element.get_text(strip=True)
+                price_str_for_log = price # Update for log
             else:
                 price_element = item.select_one('span.a-price span.a-offscreen')
                 if price_element:
                     price = price_element.get_text(strip=True).replace('₹', '').replace(',', '')
-            if price == "N/A":
+                    price_str_for_log = price # Update for log
+            if price_str_for_log == "N/A": # Check against log variable
                 print(f"Amazon: Price not found for item {i+1}")
 
-            # URL Extraction
+            # URL Extraction (existing logic)
+            url_str_for_log = "N/A" # Placeholder for logging
             url_element = item.select_one('h2 a.a-link-normal')
             if url_element and url_element.has_attr('href'):
                 raw_url = url_element['href']
-                # Ensure URL is absolute and clean off query parameters if desired (though not strictly needed for MVP)
                 if raw_url.startswith('/'):
-                    url = "https://www.amazon.in" + raw_url.split('?')[0] # Basic cleaning
+                    url = "https://www.amazon.in" + raw_url.split('?')[0]
                 else:
-                    url = raw_url.split('?')[0] # Basic cleaning
+                    url = raw_url.split('?')[0]
+                url_str_for_log = url # Update for log
             else:
                 url_element = item.select_one('a.a-link-normal.s-no-outline')
                 if url_element and url_element.has_attr('href'):
@@ -182,20 +264,22 @@ def scrape_amazon(query: str, pincode: str) -> dict:
                         url = "https://www.amazon.in" + raw_url.split('?')[0]
                     else:
                         url = raw_url.split('?')[0]
-            if url == "N/A":
+                    url_str_for_log = url # Update for log
+            if url_str_for_log == "N/A": # Check against log variable
                 print(f"Amazon: URL not found for item {i+1}")
 
-            print(f"Amazon: Item {i+1} Raw Extract - Title: '{title}', Price: '{price}', URL: '{url}'")
+            print(f"Amazon: Item {i+1} Raw Extract - Title: '{title}', Price: '{price_str_for_log}', URL: '{url_str_for_log}'")
 
-            if title != "Not found" and price != "N/A" and url != "N/A":
-                query_keywords = query.lower().split()
-                title_lower = title.lower()
-                # Check if at least one of the first two keywords of the query is in the title
-                if any(keyword in title_lower for keyword in query_keywords[:2]):
-                    print(f"Amazon: Found relevant product: Title='{title}', Price='{price}', URL='{url}'")
+            if title != "Not found" and price_str_for_log != "N/A" and url_str_for_log != "N/A":
+                # New Gemini Relevance Check:
+                # 'search_query' is the standardized query passed to this function.
+                if is_product_relevant_gemini(search_query, title, api_key):
+                    print(f"Amazon: Gemini confirmed product '{title}' is relevant for query '{search_query}'.")
+                    # 'price' variable holds the string for price (e.g., "12999.00" or "N/A" if not found earlier)
+                    # 'url' variable holds the string for URL
                     return {"title": title, "price": price, "url": url, "status": "Available on Amazon"}
                 else:
-                    print(f"Amazon: Item {i+1} title '{title}' deemed not relevant enough for query '{query}'.")
+                    print(f"Amazon: Gemini (or fallback) deemed product '{title}' NOT relevant for query '{search_query}'.")
             else:
                 print(f"Amazon: Could not extract all required info for item {i+1}.")
 
@@ -213,19 +297,20 @@ def scrape_amazon(query: str, pincode: str) -> dict:
             driver.quit()
             print("Amazon: WebDriver closed.")
 
-def scrape_flipkart(query: str, pincode: str) -> dict:
+def scrape_flipkart(search_query: str, pincode: str, api_key: str) -> dict: # Renamed query to search_query, added api_key
     """
     Scrapes Flipkart.com for a given product query and pincode.
 
     Args:
-        query (str): The product search query.
+        search_query (str): The product search query (standardized by Gemini).
         pincode (str): The delivery pincode.
+        api_key (str): The Gemini API key for relevance checking.
 
     Returns:
         dict: A dictionary containing product title, price, URL, and status.
               Returns "Not found" or "Error" status if issues occur.
     """
-    print(f"Flipkart: Starting scrape for query: '{query}' with pincode: {pincode}") # Added platform prefix
+    print(f"Flipkart: Starting scrape for query: '{search_query}' with pincode: {pincode}") # Use search_query
     options = webdriver.ChromeOptions()
     # It's generally good to keep headless, window-size, and user-agent consistent.
     # uc.Chrome might manage some of these aspects differently, but providing them is usually fine.
@@ -249,28 +334,27 @@ def scrape_flipkart(query: str, pincode: str) -> dict:
         print("Flipkart: Navigated to homepage.")
         time.sleep(random.uniform(1, 2)) # Initial load pause
 
-        # Handle Login Pop-up
-        try:
-            print("Flipkart: Checking for login popup...")
-            # More specific XPATH, looking for a button, possibly with specific text or class
-            login_popup_close_button = WebDriverWait(driver, 7).until( # Reduced wait time for popup
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '✕')] | //button[contains(@class, '_2KpZ6l') and contains(@class, '_2doB4z')] | //span[contains(@class, '_30XB9F') and text()='✕']"))
-            ) # Added one more common selector for close button (span type)
-            login_popup_close_button.click()
-            print("Flipkart: Login popup closed.")
-            time.sleep(random.uniform(0.5, 1))
-        except Exception as e:
-            print(f"Flipkart: Login popup not found or could not be closed (this is often OK): {e}")
+        # --- DIAGNOSTIC: Temporarily comment out login popup handling ---
+        # print("Flipkart: Checking for login popup...")
+        # try:
+        #     login_popup_close_button = WebDriverWait(driver, 7).until(
+        #         EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '✕')] | //button[contains(@class, '_2KpZ6l') and contains(@class, '_2doB4z')] | //span[contains(@class, '_30XB9F') and text()='✕']"))
+        #     )
+        #     login_popup_close_button.click()
+        #     print("Flipkart: Login popup closed.")
+        #     time.sleep(random.uniform(0.5, 1))
+        # except Exception as e:
+        #     print(f"Flipkart: Login popup not found or could not be closed (this is often OK): {e}")
+        print("Flipkart: Login pop-up handling TEMPORARILY COMMENTED OUT for diagnosis.")
+        # --- END DIAGNOSTIC ---
+
 
         # Product Search
         print(f"Flipkart: Searching for product: '{query}'...")
-        # Using a more encompassing selector for search bar, then filtering for visibility
         search_bar_selectors = "input[name='q'], input[title='Search for Products, Brands and More'], input[title='Search for products, brands and more']"
         search_bar = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, search_bar_selectors)))
 
-        # Ensure the located search bar is visible and interactable
         if not search_bar.is_displayed():
-            # If the first found isn't visible, try to find another one that is (less common)
             search_bars = driver.find_elements(By.CSS_SELECTOR, search_bar_selectors)
             search_bar = next((bar for bar in search_bars if bar.is_displayed()), None)
             if not search_bar:
@@ -278,22 +362,37 @@ def scrape_flipkart(query: str, pincode: str) -> dict:
 
         search_bar.clear()
         search_bar.send_keys(query)
+        current_url = driver.current_url # Store current URL before search
         search_bar.send_keys(Keys.ENTER)
         print(f"Flipkart: Search submitted for '{query}'.")
 
-        # Wait for Search Results Page
+        # Wait for Search Results Page (Revised Strategy)
+        print("Flipkart: Search submitted. Waiting for search results page to load or URL to change...")
         try:
-            # Wait for at least one product card indicator to be present
-            results_page_indicator_selector = "div._1AtVbE, div._13oc-S, div[data-id^='MOB']" # Added data-id starting with MOB for mobiles often
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, results_page_indicator_selector))
+            WebDriverWait(driver, 25).until( # Increased timeout to 25 seconds
+                EC.any_of(
+                    EC.url_changes(current_url),
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div#container div[data-id]")), # Product card within main container
+                    EC.presence_of_element_located((By.XPATH, "//div[contains(text(), 'No results found for')]")), # "No results" message
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div._1YokD2")) # Main content wrapper
+                )
             )
-            print("Flipkart: Search results page loaded (at least one potential item indicator found).")
-        except Exception as e:
-            print(f"Flipkart: Search results page did not load as expected: {e}")
-            # Try to capture a screenshot here if debugging indicates it's useful
-            # driver.save_screenshot("flipkart_search_fail.png")
-            return {"title": "Not found", "price": "N/A", "url": "N/A", "status": "Flipkart search results page error"}
+            print(f"Flipkart: Search results page indicators detected. Current URL: {driver.current_url}")
+            print(f"Flipkart: Page title after search attempt: {driver.title}")
+
+        except TimeoutException:
+            print("Flipkart: Timeout waiting for search results page indicators (URL change, product cards, 'no results' message, or main wrapper).")
+            print(f"Flipkart: Current URL is still: {driver.current_url}")
+            print(f"Flipkart: Page title on timeout: {driver.title}")
+            page_snippet = driver.page_source[2000:6000]
+            print(f"Flipkart: Page source snippet on timeout:\n{page_snippet}")
+            return {"title": "Not found", "price": "N/A", "url": "N/A", "status": "Flipkart search results page timeout"}
+
+        # Explicitly check for "No results found" message
+        no_results_elements = driver.find_elements(By.XPATH, "//div[contains(text(), 'No results found for')]")
+        if no_results_elements:
+            print(f"Flipkart: Page explicitly indicates 'No results found for {query}'.")
+            return {"title": "Not found", "price": "N/A", "url": "N/A", "status": f"Flipkart: No results found for '{query}'"}
 
         soup = BeautifulSoup(driver.page_source, "html.parser")
 
@@ -348,11 +447,10 @@ def scrape_flipkart(query: str, pincode: str) -> dict:
             print(f"Flipkart: Item {i+1} Raw Extract - Title: '{title}', Price: '{price}', URL: '{url}'")
 
             if title != "Not found" and price != "N/A" and url != "N/A" and not title.lower().startswith("ad"): # Basic ad filter
-                query_keywords = query.lower().split()
-                title_lower = title.lower()
-                if any(keyword in title_lower for keyword in query_keywords[:2]): # Relevance check
-                    print(f"Flipkart: Found relevant product candidate: Title='{title}', Price='{price}', URL='{url}'")
-                    search_page_price = price # Store for fallback
+                # New Gemini Relevance Check
+                if is_product_relevant_gemini(search_query, title, api_key):
+                    print(f"Flipkart: Gemini confirmed product '{title}' is relevant for query '{search_query}'.")
+                    search_page_price = price # Store for fallback (this is the price from search results)
 
                     try:
                         print(f"Flipkart: Navigating to product page: {url}")
@@ -398,13 +496,14 @@ def scrape_flipkart(query: str, pincode: str) -> dict:
                         if final_title_el:
                             title = final_title_el.get_text(strip=True)
 
-                        return {"title": title, "price": price, "url": url, "status": "Available on Flipkart"}
+                        return {"title": title, "price": price, "url": url, "status": "Available on Flipkart"} # price here is after pincode logic
 
                     except Exception as e_pd_page:
                         print(f"Flipkart: Error during product page interaction or pincode check for {url}: {e_pd_page}")
+                        # Return title and search_page_price (price before product page)
                         return {"title": title, "price": search_page_price, "url": url, "status": "Available on Flipkart (pincode check failed/price not re-verified)"}
                 else:
-                    print(f"Flipkart: Item {i+1} title '{title}' (Ad: {title.lower().startswith('ad')}) not relevant enough for query '{query}'.")
+                    print(f"Flipkart: Gemini (or fallback) deemed product '{title}' NOT relevant for query '{search_query}'.")
             else:
                 print(f"Flipkart: Could not extract all required info for item {i+1}.")
 
@@ -592,14 +691,14 @@ if __name__ == "__main__":
             flipkart_results = {"title": "N/A", "price": "N/A", "url": "N/A", "status": "Not Scraped (Query Missing or Error)"}
 
             print(f"\nAttempting to scrape Amazon for '{standardized_query}' with pincode {default_pincode}...")
-            amazon_results = scrape_amazon(standardized_query, default_pincode)
+            amazon_results = scrape_amazon(standardized_query, default_pincode, api_key) # Pass api_key
             # print(f"Amazon Results: {amazon_results}") # Raw results, display_results will format
 
             print(f"\nAttempting to scrape Flipkart for '{standardized_query}' with pincode {default_pincode}...")
-            flipkart_results = scrape_flipkart(standardized_query, default_pincode)
+            flipkart_results = scrape_flipkart(standardized_query, default_pincode, api_key) # Pass api_key
             # print(f"Flipkart Results: {flipkart_results}") # Raw results, display_results will format
 
-            display_results(user_query, amazon_results, flipkart_results)
+            display_results(user_query, amazon_results, flipkart_results) # user_query is original query
         else:
             print("Could not proceed with scraping as the standardized query was empty.")
 

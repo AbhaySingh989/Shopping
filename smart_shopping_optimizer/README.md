@@ -42,18 +42,14 @@ The agent follows these steps to provide a price comparison:
 3.  **Query Standardization (Gemini):**
     *   Sends your input to the Gemini 1.5 Flash model.
     *   Gemini refines the query into a standardized format suitable for e-commerce search engines.
-4.  **Web Scraping (Concurrent for user experience, sequential in current MVP code):**
-    *   **Amazon.in:**
-        *   Opens Amazon.in in a headless browser (simulated browser invisible to you).
-        *   Sets the delivery Pincode to 560020.
+4.  **Web Scraping (Sequential in current MVP code):**
+    *   **Amazon.in / Flipkart.com (for each platform):**
+        *   Opens the respective website in a headless browser using `undetected-chromedriver`.
+        *   Sets the delivery Pincode to 560020 (attempted on Amazon main page, and on Flipkart product page).
         *   Performs a search using the standardized query.
-        *   Extracts product title, price, and URL from the first few relevant search results.
-    *   **Flipkart.com:**
-        *   Opens Flipkart.com in a headless browser.
-        *   Handles potential login pop-ups.
-        *   Performs a search using the standardized query.
-        *   Extracts product title, price, and URL from the first few relevant search results.
-        *   Attempts to set the Pincode to 560020 on the product page to get location-specific pricing.
+        *   Extracts product title, price, and URL from the first few search results.
+        *   **Relevance Check (Gemini):** For each potential product found, its title is sent to Gemini to determine if it's a relevant match for the user's query. Only relevant products are considered.
+        *   (Flipkart specific: If a relevant product is found on the search page, navigates to its product page to attempt pincode update and price re-verification.)
 5.  **Output Presentation:**
     *   Displays the extracted information (title, price, URL, status) for both Amazon.in and Flipkart.com in the command line.
     *   Provides a simple recommendation (e.g., "Amazon.in is cheaper," "Prices are similar," "Product not found").
@@ -66,7 +62,9 @@ The agent follows these steps to provide a price comparison:
 ## 3. Tools and Technologies Used
 
 *   **Programming Language:** Python 3.x
-*   **Large Language Model (LLM):** Google Gemini 1.5 Flash (via `google-generativeai` library) for query standardization.
+*   **Large Language Model (LLM):** Google Gemini 1.5 Flash (via `google-generativeai` library) for:
+        *   Standardizing the user's initial product query.
+        *   Evaluating the relevance of scraped product titles against the user's query.
 *   **Web Scraping & Automation:**
     *   **Selenium (`selenium` library):** For browser automation.
     *   **Undetected ChromeDriver (`undetected-chromedriver` library):** Powers Selenium with a ChromeDriver that is less prone to detection by websites. It typically manages its own driver versioning.
@@ -82,8 +80,8 @@ Follow these instructions to set up and run the Smart Shopping List Optimizer on
 **Prerequisites:**
 *   Python 3.7 or higher installed. You can download it from [python.org](https://www.python.org/downloads/).
 *   `pip` (Python package installer), which usually comes with Python.
-*   Google Chrome browser installed (as the agent currently uses ChromeDriver).
-*   A Gemini API Key from Google AI Studio. You can get one [here](https://aistudio.google.com/app/apikey).
+*   Google Chrome browser installed (as the agent currently uses `undetected-chromedriver` which works with Chrome).
+*   A Gemini API Key from Google AI Studio. You can get one [here](https://aistudio.google.com/app/apikey). (Note: The agent uses the Gemini API for both standardizing your search query and for checking the relevance of found products. This may result in multiple API calls per user search.)
 
 **Setup Instructions:**
 
@@ -164,11 +162,14 @@ Follow these instructions to set up and run the Smart Shopping List Optimizer on
     *   **Antivirus/Firewall**: Ensure your security software isn't blocking `undetected-chromedriver` or the Chrome instances it launches.
     *   **Profile Issues**: `uc` sometimes uses existing Chrome profiles or creates temporary ones. If you face persistent issues, try running after closing all other Chrome instances.
 *   **Scraping Failures (Product "Not Found" or "Error")**:
-    *   The agent now has more detailed logging. Check the console output for messages from "Amazon:" and "Flipkart:" prefixes to understand at what stage (pincode, search, item processing, relevance check, etc.) the issue occurred. This can help identify if it's a selector issue, network problem, or an anti-scraping measure.
+    *   The agent now has more detailed logging. Check the console output for messages from "Amazon:" and "Flipkart:" prefixes to understand at what stage (pincode, search, item processing, relevance check by Gemini, etc.) the issue occurred. This can help identify if it's a selector issue, network problem, or an anti-scraping measure.
     *   E-commerce websites change their layout frequently. The selectors used for scraping might become outdated. This is a common challenge with web scraping.
     *   The product might genuinely not be available on one or both platforms.
-    *   Your internet connection might be unstable, or the websites might be temporarily blocking automated requests (though the agent uses some basic measures to appear like a regular user).
+    *   Your internet connection might be unstable, or the websites might be temporarily blocking automated requests.
     *   Heavy CAPTCHAs can block the scraper.
+*   **Gemini Relevance Check Issues**:
+    *   If the agent consistently fails to find relevant products even when they seem present, it might be an issue with the Gemini relevance check (e.g., the prompt needing refinement for certain types of queries, or unexpected Gemini API responses). The console logs show Gemini's textual response ("yes"/"no") for each check.
+    *   Ensure your `GEMINI_API_KEY` is valid and has not exceeded any usage quotas, as this is now used for both query standardization and relevance checking.
 *   **Pincode Issues**: The agent tries to set the pincode to 560020. If the websites change how pincodes are handled, this might fail, and prices might not be for the target location.
 
 This README should provide a solid foundation for users to understand and run the agent.
