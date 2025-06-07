@@ -161,10 +161,10 @@ def scrape_amazon(search_query: str, pincode: str, api_key: str) -> dict: # Rena
             # time.sleep(random.uniform(1,3))
 
         # --- Product Search ---
-        print(f"Amazon: Searching for product: '{query}'...")
+        print(f"Amazon: Searching for product: '{search_query}'...") # Corrected to search_query
         search_bar = wait.until(EC.visibility_of_element_located((By.ID, "twotabsearchtextbox")))
         search_bar.clear()
-        search_bar.send_keys(query)
+        search_bar.send_keys(search_query) # Corrected to search_query
         search_bar.send_keys(Keys.ENTER)
         print("Amazon: Search submitted.")
 
@@ -334,23 +334,26 @@ def scrape_flipkart(search_query: str, pincode: str, api_key: str) -> dict: # Re
         print("Flipkart: Navigated to homepage.")
         time.sleep(random.uniform(1, 2)) # Initial load pause
 
-        # --- DIAGNOSTIC: Temporarily comment out login popup handling ---
-        # print("Flipkart: Checking for login popup...")
-        # try:
-        #     login_popup_close_button = WebDriverWait(driver, 7).until(
-        #         EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '✕')] | //button[contains(@class, '_2KpZ6l') and contains(@class, '_2doB4z')] | //span[contains(@class, '_30XB9F') and text()='✕']"))
-        #     )
-        #     login_popup_close_button.click()
-        #     print("Flipkart: Login popup closed.")
-        #     time.sleep(random.uniform(0.5, 1))
-        # except Exception as e:
-        #     print(f"Flipkart: Login popup not found or could not be closed (this is often OK): {e}")
-        print("Flipkart: Login pop-up handling TEMPORARILY COMMENTED OUT for diagnosis.")
-        # --- END DIAGNOSTIC ---
-
+        # Re-enable Login Pop-up Handling
+        print("Flipkart: Checking for login popup...")
+        try:
+            # Wait for up to 7 seconds for the button to be clickable
+            # Added //span[contains(@class, '_30XB9F')] as another common selector for close
+            login_popup_close_button = WebDriverWait(driver, 7).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '✕')] | //button[contains(@class, '_2KpZ6l') and contains(@class, '_2doB4z')] | //span[contains(@class, '_30XB9F')]"))
+            )
+            login_popup_close_button.click()
+            print("Flipkart: Login popup closed.")
+            time.sleep(random.uniform(0.5, 1)) # Brief pause after closing
+        except TimeoutException: # Explicitly catch TimeoutException
+            print("Flipkart: Login popup close button not found within timeout (popup might not be present).")
+        except Exception as e:
+            # Log other exceptions, but don't let them stop the script if closing fails
+            print(f"Flipkart: An error occurred trying to close login popup (continuing attempt): {e}")
+        # --- End of Login Pop-up Handling ---
 
         # Product Search
-        print(f"Flipkart: Searching for product: '{query}'...")
+        print(f"Flipkart: Searching for product: '{search_query}'...") # Corrected to search_query
         search_bar_selectors = "input[name='q'], input[title='Search for Products, Brands and More'], input[title='Search for products, brands and more']"
         search_bar = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, search_bar_selectors)))
 
@@ -361,10 +364,10 @@ def scrape_flipkart(search_query: str, pincode: str, api_key: str) -> dict: # Re
                 raise Exception("Flipkart search bar found but not visible/interactable.")
 
         search_bar.clear()
-        search_bar.send_keys(query)
+        search_bar.send_keys(search_query) # Corrected to search_query
         current_url = driver.current_url # Store current URL before search
         search_bar.send_keys(Keys.ENTER)
-        print(f"Flipkart: Search submitted for '{query}'.")
+        print(f"Flipkart: Search submitted for '{search_query}'.") # Corrected to search_query
 
         # Wait for Search Results Page (Revised Strategy)
         print("Flipkart: Search submitted. Waiting for search results page to load or URL to change...")
@@ -391,8 +394,8 @@ def scrape_flipkart(search_query: str, pincode: str, api_key: str) -> dict: # Re
         # Explicitly check for "No results found" message
         no_results_elements = driver.find_elements(By.XPATH, "//div[contains(text(), 'No results found for')]")
         if no_results_elements:
-            print(f"Flipkart: Page explicitly indicates 'No results found for {query}'.")
-            return {"title": "Not found", "price": "N/A", "url": "N/A", "status": f"Flipkart: No results found for '{query}'"}
+            print(f"Flipkart: Page explicitly indicates 'No results found for {search_query}'.") # Corrected to search_query
+            return {"title": "Not found", "price": "N/A", "url": "N/A", "status": f"Flipkart: No results found for '{search_query}'"} # Corrected to search_query
 
         soup = BeautifulSoup(driver.page_source, "html.parser")
 
