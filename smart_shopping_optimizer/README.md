@@ -43,13 +43,19 @@ The agent follows these steps to provide a price comparison:
     *   Sends your input to the Gemini 1.5 Flash model.
     *   Gemini refines the query into a standardized format suitable for e-commerce search engines.
 4.  **Web Scraping (Sequential in current MVP code):**
-    *   **Amazon.in / Flipkart.com (for each platform):**
-        *   Opens the respective website in a headless browser using `undetected-chromedriver`.
-        *   Sets the delivery Pincode to 560020 (attempted on Amazon main page, and on Flipkart product page).
+    *   **Amazon.in (via Selenium & `undetected-chromedriver`):**
+        *   Opens Amazon.in in a headless browser.
+        *   Sets the delivery Pincode to 560020 on the main page.
         *   Performs a search using the standardized query.
-        *   Extracts product title, price, and URL from the first few search results.
-        *   **Relevance Check (Gemini):** For each potential product found, its title is sent to Gemini to determine if it's a relevant match for the user's query. Only relevant products are considered.
-        *   (Flipkart specific: If a relevant product is found on the search page, navigates to its product page to attempt pincode update and price re-verification.)
+        *   Extracts product title, price, and URL from the first few relevant search results using BeautifulSoup.
+        *   **Relevance Check (Gemini):** For each potential product, its title is sent to Gemini to determine if it's a relevant match. Only relevant products are considered.
+    *   **Flipkart.com (via Crawl4AI):**
+        *   Constructs a search URL for Flipkart.
+        *   Uses `Crawl4AI` to navigate to the search URL, configured with geolocation settings for Bangalore (Pincode 560020 equivalent).
+        *   `Crawl4AI` fetches the page content and converts it into clean Markdown.
+        *   Sends this Markdown output to Gemini, along with a prompt, to extract a list of potential products (titles, prices, URLs).
+        *   For each product extracted by Gemini, a final relevance check is performed using another Gemini call (comparing the extracted title to the standardized user query).
+        *   The first relevant product's details are taken.
 5.  **Output Presentation:**
     *   Displays the extracted information (title, price, URL, status) for both Amazon.in and Flipkart.com in the command line.
     *   Provides a simple recommendation (e.g., "Amazon.in is cheaper," "Prices are similar," "Product not found").
@@ -64,11 +70,16 @@ The agent follows these steps to provide a price comparison:
 *   **Programming Language:** Python 3.x
 *   **Large Language Model (LLM):** Google Gemini 1.5 Flash (via `google-generativeai` library) for:
         *   Standardizing the user's initial product query.
-        *   Evaluating the relevance of scraped product titles against the user's query.
+        *   Evaluating the relevance of scraped product titles (from both Amazon and Flipkart) against the user's query.
+        *   Extracting structured product data (title, price, URL) from the Markdown content retrieved by `Crawl4AI` for Flipkart.
 *   **Web Scraping & Automation:**
-    *   **Selenium (`selenium` library):** For browser automation.
-    *   **Undetected ChromeDriver (`undetected-chromedriver` library):** Powers Selenium with a ChromeDriver that is less prone to detection by websites. It typically manages its own driver versioning.
-    *   **BeautifulSoup4 (`beautifulsoup4` library):** For parsing HTML content.
+    *   **Amazon.in:**
+        *   **Selenium (`selenium` library) with `undetected-chromedriver`:** For browser automation to scrape Amazon.in.
+        *   **BeautifulSoup4 (`beautifulsoup4` library):** For parsing HTML content from Amazon.in.
+    *   **Flipkart.com:**
+        *   **Crawl4AI (`crawl4ai` library):** An LLM-friendly web crawler used to fetch and preprocess content from Flipkart.com. It uses Playwright for browser automation.
+        *   **Geolocation via `Crawl4AI`:** Attempts to set location to Bangalore using latitude/longitude for more accurate Flipkart results.
+    *   **Pydantic (`pydantic` library):** Used for data modeling, particularly for structuring data extracted by Gemini from `Crawl4AI`'s output.
 *   **Environment Management:**
     *   **python-dotenv (`python-dotenv` library):** For managing API keys and other configurations securely in a `.env` file.
 *   **Development Environment:** A standard Python environment with `pip` for package management.
@@ -80,8 +91,17 @@ Follow these instructions to set up and run the Smart Shopping List Optimizer on
 **Prerequisites:**
 *   Python 3.7 or higher installed. You can download it from [python.org](https://www.python.org/downloads/).
 *   `pip` (Python package installer), which usually comes with Python.
-*   Google Chrome browser installed (as the agent currently uses `undetected-chromedriver` which works with Chrome).
-*   A Gemini API Key from Google AI Studio. You can get one [here](https://aistudio.google.com/app/apikey). (Note: The agent uses the Gemini API for both standardizing your search query and for checking the relevance of found products. This may result in multiple API calls per user search.)
+*   Google Chrome browser installed (for Selenium-based Amazon scraper and if Playwright uses it).
+*   A Gemini API Key from Google AI Studio.
+    (Note: The agent uses the Gemini API for query standardization, relevance checking, and potentially for extracting data from Flipkart if `Crawl4AI` is used.)
+*   **Playwright Browsers**: The `Crawl4AI` library uses Playwright for its browser automation (used for Flipkart). After installing requirements, you'll need to install browser binaries for Playwright by running:
+    ```bash
+    crawl4ai-setup
+    ```
+    Or, more specifically for Chromium (recommended if issues persist):
+    ```bash
+    python -m playwright install --with-deps chromium
+    ```
 
 **Setup Instructions:**
 
@@ -117,7 +137,7 @@ Follow these instructions to set up and run the Smart Shopping List Optimizer on
    ```bash
    pip install -r requirements.txt
    ```
-   This command installs all libraries listed in `requirements.txt`, including `google-generativeai`, `selenium`, `undetected-chromedriver`, `beautifulsoup4`, and `python-dotenv`.
+   This will install `google-generativeai`, `selenium`, `undetected-chromedriver`, `beautifulsoup4`, `python-dotenv`, `crawl4ai`, and `pydantic`.
 
 **Step 4: Set Up Environment Variables (.env file)**
    The agent needs your Gemini API Key to function.
@@ -156,21 +176,26 @@ Follow these instructions to set up and run the Smart Shopping List Optimizer on
 *   **Selenium/WebDriver Errors (e.g., `WebDriverException`, `SessionNotCreatedException`)**:
     *   Ensure Google Chrome is installed and up to date.
     *   Make sure no antivirus or firewall is blocking WebDriver's operation.
-    *   On some systems, especially Linux servers or Docker containers, you might need to install additional dependencies for headless Chrome.
-*   **`undetected-chromedriver` specific issues**:
+    *   On some systems, especially Linux servers or Docker containers, you might need to install additional dependencies for headless Chrome (for the Amazon scraper).
+*   **`undetected-chromedriver` specific issues (Amazon Scraper)**:
     *   **Chrome Version Mismatches**: `undetected-chromedriver` tries to download the correct driver for your installed Chrome version. If you update Chrome, `uc` might need to re-download a new driver on the next run. This is usually automatic.
     *   **Antivirus/Firewall**: Ensure your security software isn't blocking `undetected-chromedriver` or the Chrome instances it launches.
     *   **Profile Issues**: `uc` sometimes uses existing Chrome profiles or creates temporary ones. If you face persistent issues, try running after closing all other Chrome instances.
-*   **Scraping Failures (Product "Not Found" or "Error")**:
+*   **`Crawl4AI` / Playwright Issues (Flipkart Scraper)**:
+    *   **Browser Installation**: If you see errors related to Playwright browsers not being found, ensure you've run `crawl4ai-setup` or `python -m playwright install --with-deps chromium` after installing requirements.
+    *   **`Crawl4AI` Failures**: If `Crawl4AI` fails to fetch content from Flipkart (e.g., status message "Crawl4AI failed to retrieve content"), it could be due to network issues, Flipkart blocking the request (even with `Crawl4AI`), or changes in Flipkart's site structure that `Crawl4AI` cannot process effectively. The console logs from the script might provide more details from `Crawl4AI`'s output.
+    *   **Geolocation**: While `Crawl4AI` attempts to set geolocation for Flipkart, its effectiveness can vary and might not always reflect exact pincode-level pricing if Flipkart's site relies on other mechanisms.
+*   **Scraping Failures (General - Product "Not Found" or "Error")**:
     *   The agent now has more detailed logging. Check the console output for messages from "Amazon:" and "Flipkart:" prefixes to understand at what stage (pincode, search, item processing, relevance check by Gemini, etc.) the issue occurred. This can help identify if it's a selector issue, network problem, or an anti-scraping measure.
-    *   E-commerce websites change their layout frequently. The selectors used for scraping might become outdated. This is a common challenge with web scraping.
+    *   E-commerce websites change their layout frequently. The selectors used for scraping (especially for the Selenium-based Amazon scraper) might become outdated. This is a common challenge with web scraping.
     *   The product might genuinely not be available on one or both platforms.
     *   Your internet connection might be unstable, or the websites might be temporarily blocking automated requests.
-    *   Heavy CAPTCHAs can block the scraper.
-*   **Gemini Relevance Check Issues**:
-    *   If the agent consistently fails to find relevant products even when they seem present, it might be an issue with the Gemini relevance check (e.g., the prompt needing refinement for certain types of queries, or unexpected Gemini API responses). The console logs show Gemini's textual response ("yes"/"no") for each check.
-    *   Ensure your `GEMINI_API_KEY` is valid and has not exceeded any usage quotas, as this is now used for both query standardization and relevance checking.
-*   **Pincode Issues**: The agent tries to set the pincode to 560020. If the websites change how pincodes are handled, this might fail, and prices might not be for the target location.
+    *   Heavy CAPTCHAs can block the scrapers.
+*   **Gemini Data Extraction/Relevance Check Issues**:
+    *   If product data from Flipkart is missing or inaccurate, it might be due to Gemini's interpretation of `Crawl4AI`'s Markdown output. The prompt for this extraction is in `extract_flipkart_data_gemini`.
+    *   If relevance checking seems off for either platform, the prompts in `is_product_relevant_gemini` might need adjustment.
+    *   Ensure your `GEMINI_API_KEY` is valid and has not exceeded quotas, as it's now used for query standardization, relevance checking, and Flipkart data extraction.
+*   **Pincode Issues**: The agent tries to set the pincode to 560020. For Amazon, this is via Selenium UI interaction. For Flipkart (Crawl4AI), it's via geolocation and potentially in the search URL. If the websites change how pincodes are handled, this might fail, and prices might not be for the target location.
 
 This README should provide a solid foundation for users to understand and run the agent.
 ```
