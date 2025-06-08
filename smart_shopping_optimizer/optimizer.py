@@ -335,13 +335,33 @@ def scrape_flipkart(search_query: str, pincode: str, api_key: str, original_user
         return asyncio.run(scrape_flipkart_crawl4ai(search_query, pincode, api_key, original_user_query))
     except RuntimeError as e:
         if " asyncio.run() cannot be called from a running event loop" in str(e):
-            print("Flipkart (Crawl4AI): Detected running event loop. This scenario is not fully supported in the current script structure for nested async calls.")
+            print("Flipkart (Crawl4AI): Detected running event loop. This script is designed to be run with asyncio.run() as the top-level call for the async part.")
             return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"Async setup error: {e}"}
-        print(f"Flipkart (Crawl4AI): Error running async scraper: {e}")
-        return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"Error in Crawl4AI async execution: {e}"}
-    except Exception as e: # Catch any other unexpected error during asyncio.run
-        print(f"Flipkart (Crawl4AI): A general error occurred running async scraper: {e}")
-        return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"General error in Crawl4AI async run: {e}"}
+        # Fallthrough to general exception if not the specific RuntimeError
+        print(f"Flipkart (Crawl4AI): A RuntimeError occurred: {e}")
+        return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"Runtime error in Crawl4AI async execution: {e}"}
+    except Exception as e:
+        error_str = str(e).lower()
+        playwright_help_message = "Ensure Playwright browsers are installed by running 'crawl4ai-setup' or 'python -m playwright install --with-deps chromium' in your terminal."
+
+        # Keywords indicating Playwright browser issues
+        playwright_error_keywords = [
+            "executable doesn't exist",
+            "playwright install",
+            "chromium-", # Often part of missing browser error messages like "chromium-1169" or similar
+            "browser was not found"
+        ]
+
+        if any(keyword in error_str for keyword in playwright_error_keywords):
+            print(f"Flipkart (Crawl4AI): Playwright browser executable error: {e}. {playwright_help_message}")
+            status_message = f"Playwright setup needed: Browsers not found. {playwright_help_message} (Error: {e})"
+        else:
+            print(f"Flipkart (Crawl4AI): General error running async scraper: {e}")
+            # import traceback # Uncomment for debugging if needed
+            # print(traceback.format_exc()) # Uncomment for debugging if needed
+            status_message = f"General error in Crawl4AI async execution: {e}"
+
+        return {"title": "Error", "price": "N/A", "url": "N/A", "status": status_message}
 
 
 # --- Output Presentation ---

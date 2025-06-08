@@ -88,20 +88,29 @@ The agent follows these steps to provide a price comparison:
 
 Follow these instructions to set up and run the Smart Shopping List Optimizer on your local machine.
 
+**❗ Important Note for Flipkart Scraping ❗**
+
+This agent uses the `Crawl4AI` library for scraping Flipkart.com, which in turn relies on Playwright for browser automation. After installing the Python requirements (Step 3 below), you **must** install the necessary Playwright browser binaries.
+
+Run one of the following commands in your terminal:
+```bash
+crawl4ai-setup
+```
+Or, for a more specific Chromium installation (often recommended):
+```bash
+python -m playwright install --with-deps chromium
+```
+**Failure to do this will result in errors when the agent attempts to scrape Flipkart.**
+
+---
+
 **Prerequisites:**
 *   Python 3.7 or higher installed. You can download it from [python.org](https://www.python.org/downloads/).
 *   `pip` (Python package installer), which usually comes with Python.
 *   Google Chrome browser installed (for Selenium-based Amazon scraper and if Playwright uses it).
 *   A Gemini API Key from Google AI Studio.
     (Note: The agent uses the Gemini API for query standardization, relevance checking, and potentially for extracting data from Flipkart if `Crawl4AI` is used.)
-*   **Playwright Browsers**: The `Crawl4AI` library uses Playwright for its browser automation (used for Flipkart). After installing requirements, you'll need to install browser binaries for Playwright by running:
-    ```bash
-    crawl4ai-setup
-    ```
-    Or, more specifically for Chromium (recommended if issues persist):
-    ```bash
-    python -m playwright install --with-deps chromium
-    ```
+*   **Playwright Browsers**: As highlighted in the important note above, ensure Playwright browsers are installed after Step 3. This is critical for Flipkart scraping.
 
 **Setup Instructions:**
 
