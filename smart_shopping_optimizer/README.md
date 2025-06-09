@@ -10,11 +10,15 @@ This AI-powered command-line agent helps you quickly compare product prices betw
 **Core Features:**
 *   **Natural Language Input:** Enter a product name or description in plain English (e.g., "iPhone 15 Pro Max 256GB," "Samsung washing machine 7kg," "LG smart TV 55 inch").
 *   **AI-Powered Query Standardization:** Uses Google's Gemini 1.5 Flash model to refine your input into an effective search query for e-commerce sites.
-*   **Dual Platform Scraping:** Automatically searches for the product on:
-    *   Amazon India (amazon.in)
-    *   Flipkart India (flipkart.com)
+*   **Multi-Platform Scraping:**
+    *   **Supported Platforms:**
+        *   Amazon India (amazon.in) - Fully implemented
+        *   Flipkart India (flipkart.com) - Fully implemented (uses Crawl4AI)
+        *   Zepto (Experimental - uses Crawl4AI, focuses on content retrieval)
+        *   Swiggy Instamart (Experimental - uses Crawl4AI, focuses on content retrieval)
+        *   Blinkit (Experimental - uses Crawl4AI, focuses on content retrieval)
 *   **Targeted Location:** Searches are performed specifically for **Bangalore, Pincode 560020**.
-*   **Data Extraction:** For each platform, the agent attempts to extract:
+*   **Data Extraction (for fully implemented platforms):** For Amazon and Flipkart, the agent attempts to extract:
     *   Product Title
     *   Product Price
     *   Direct Product URL
@@ -56,6 +60,10 @@ The agent follows these steps to provide a price comparison:
         *   Sends this Markdown output to Gemini, along with a prompt, to extract a list of potential products (titles, prices, URLs).
         *   For each product extracted by Gemini, a final relevance check is performed using another Gemini call (comparing the extracted title to the standardized user query).
         *   The first relevant product's details are taken.
+    *   **Zepto, Swiggy Instamart, Blinkit (Experimental):**
+        *   Constructs a search URL for each platform.
+        *   Uses `Crawl4AI` with geolocation for Bangalore to fetch page content as Markdown.
+        *   Currently, the primary goal is to test content retrieval. Full data extraction (titles, prices, URLs) from the Markdown output and subsequent relevance checking for these platforms is not yet implemented. The agent will report if the crawl was successful and show a snippet of retrieved Markdown.
 5.  **Output Presentation:**
     *   Displays the extracted information (title, price, URL, status) for both Amazon.in and Flipkart.com in the command line.
     *   Provides a simple recommendation (e.g., "Amazon.in is cheaper," "Prices are similar," "Product not found").
@@ -70,16 +78,17 @@ The agent follows these steps to provide a price comparison:
 *   **Programming Language:** Python 3.x
 *   **Large Language Model (LLM):** Google Gemini 1.5 Flash (via `google-generativeai` library) for:
         *   Standardizing the user's initial product query.
-        *   Evaluating the relevance of scraped product titles (from both Amazon and Flipkart) against the user's query.
+        *   Evaluating the relevance of scraped product titles (from Amazon and fully implemented Flipkart).
         *   Extracting structured product data (title, price, URL) from the Markdown content retrieved by `Crawl4AI` for Flipkart.
+        *   (Note: For experimental platforms like Zepto, Swiggy Instamart, Blinkit, current phase focuses on content retrieval; full Gemini-based data extraction from their output is a future step).
 *   **Web Scraping & Automation:**
     *   **Amazon.in:**
         *   **Selenium (`selenium` library) with `undetected-chromedriver`:** For browser automation to scrape Amazon.in.
         *   **BeautifulSoup4 (`beautifulsoup4` library):** For parsing HTML content from Amazon.in.
-    *   **Flipkart.com:**
-        *   **Crawl4AI (`crawl4ai` library):** An LLM-friendly web crawler used to fetch and preprocess content from Flipkart.com. It uses Playwright for browser automation.
-        *   **Geolocation via `Crawl4AI`:** Attempts to set location to Bangalore using latitude/longitude for more accurate Flipkart results.
-    *   **Pydantic (`pydantic` library):** Used for data modeling, particularly for structuring data extracted by Gemini from `Crawl4AI`'s output.
+    *   **Flipkart.com, Zepto, Swiggy Instamart, Blinkit (Experimental):**
+        *   **Crawl4AI (`crawl4ai` library):** An LLM-friendly web crawler used to fetch and preprocess content. It uses Playwright for browser automation.
+        *   **Geolocation via `Crawl4AI`:** Attempts to set location to Bangalore for these platforms.
+    *   **Pydantic (`pydantic` library):** Used for data modeling, particularly for structuring data extracted by Gemini from `Crawl4AI`'s output (currently for Flipkart).
 *   **Environment Management:**
     *   **python-dotenv (`python-dotenv` library):** For managing API keys and other configurations securely in a `.env` file.
 *   **Development Environment:** A standard Python environment with `pip` for package management.
@@ -176,9 +185,10 @@ python -m playwright install --with-deps chromium
 3.  Type the product you want to search for (e.g., `Sony WH-1000XM5 headphones`) and press Enter.
 4.  The agent will then:
     *   Show you the original and standardized query.
-    *   Indicate that it's starting to scrape Amazon.in. You might see some browser activity if headless mode has issues, or it might run silently. This can take some seconds.
-    *   Indicate that it's starting to scrape Flipkart.com. This also takes some seconds.
-    *   Finally, it will display the results from both platforms, followed by a recommendation.
+    *   Show you the original and standardized query.
+    *   You will be prompted to select platforms, which now include Amazon.in, Flipkart.com, and experimental options for Zepto, Swiggy Instamart, and Blinkit.
+    *   The agent will then indicate which platform it's starting to scrape. This can take some seconds per platform.
+    *   Finally, it will display the results from all selected platforms, followed by a recommendation.
 
 **Troubleshooting Common Issues:**
 *   **`ValueError: GEMINI_API_KEY not found in .env file.`**: Ensure you've created the `.env` file correctly, copied the content from `.env.example`, and replaced the placeholder with your actual API key. Make sure the file is named exactly `.env` (not `.env.txt`).
@@ -190,21 +200,26 @@ python -m playwright install --with-deps chromium
     *   **Chrome Version Mismatches**: `undetected-chromedriver` tries to download the correct driver for your installed Chrome version. If you update Chrome, `uc` might need to re-download a new driver on the next run. This is usually automatic.
     *   **Antivirus/Firewall**: Ensure your security software isn't blocking `undetected-chromedriver` or the Chrome instances it launches.
     *   **Profile Issues**: `uc` sometimes uses existing Chrome profiles or creates temporary ones. If you face persistent issues, try running after closing all other Chrome instances.
-*   **`Crawl4AI` / Playwright Issues (Flipkart Scraper)**:
+*   **`Crawl4AI` / Playwright Issues (Flipkart, Zepto, Swiggy Instamart, Blinkit Scrapers)**:
     *   **Browser Installation**: If you see errors related to Playwright browsers not being found, ensure you've run `crawl4ai-setup` or `python -m playwright install --with-deps chromium` after installing requirements.
-    *   **`Crawl4AI` Failures**: If `Crawl4AI` fails to fetch content from Flipkart (e.g., status message "Crawl4AI failed to retrieve content"), it could be due to network issues, Flipkart blocking the request (even with `Crawl4AI`), or changes in Flipkart's site structure that `Crawl4AI` cannot process effectively. The console logs from the script might provide more details from `Crawl4AI`'s output.
-    *   **Geolocation**: While `Crawl4AI` attempts to set geolocation for Flipkart, its effectiveness can vary and might not always reflect exact pincode-level pricing if Flipkart's site relies on other mechanisms.
+    *   **`Crawl4AI` Failures**: If `Crawl4AI` fails to fetch content from these platforms (e.g., status message "Crawl4AI failed to retrieve content"), it could be due to network issues, the platform blocking the request, or changes in site structure. The console logs (especially with `verbose=True` for experimental scrapers) might provide more details.
+    *   **Geolocation**: While `Crawl4AI` attempts to set geolocation, its effectiveness can vary and might not always reflect exact pincode-level pricing if a site relies on other mechanisms.
 *   **Scraping Failures (General - Product "Not Found" or "Error")**:
-    *   The agent now has more detailed logging. Check the console output for messages from "Amazon:" and "Flipkart:" prefixes to understand at what stage (pincode, search, item processing, relevance check by Gemini, etc.) the issue occurred. This can help identify if it's a selector issue, network problem, or an anti-scraping measure.
+    *   The agent now has more detailed logging. Check the console output for messages from "Amazon:", "Flipkart:", "Zepto:", etc., prefixes to understand at what stage (pincode, search, item processing, relevance check by Gemini, etc.) the issue occurred. This can help identify if it's a selector issue, network problem, or an anti-scraping measure.
     *   E-commerce websites change their layout frequently. The selectors used for scraping (especially for the Selenium-based Amazon scraper) might become outdated. This is a common challenge with web scraping.
     *   The product might genuinely not be available on one or both platforms.
     *   Your internet connection might be unstable, or the websites might be temporarily blocking automated requests.
     *   Heavy CAPTCHAs can block the scrapers.
 *   **Gemini Data Extraction/Relevance Check Issues**:
     *   If product data from Flipkart is missing or inaccurate, it might be due to Gemini's interpretation of `Crawl4AI`'s Markdown output. The prompt for this extraction is in `extract_flipkart_data_gemini`.
+    *   (Note: For experimental platforms like Zepto, Swiggy Instamart, Blinkit, current phase focuses on content retrieval; full Gemini-based data extraction from their output is a future step).
     *   If relevance checking seems off for either platform, the prompts in `is_product_relevant_gemini` might need adjustment.
     *   Ensure your `GEMINI_API_KEY` is valid and has not exceeded quotas, as it's now used for query standardization, relevance checking, and Flipkart data extraction.
-*   **Pincode Issues**: The agent tries to set the pincode to 560020. For Amazon, this is via Selenium UI interaction. For Flipkart (Crawl4AI), it's via geolocation and potentially in the search URL. If the websites change how pincodes are handled, this might fail, and prices might not be for the target location.
+*   **Pincode Issues**: The agent tries to set the pincode to 560020. For Amazon, this is via Selenium UI interaction. For other platforms using `Crawl4AI`, it's via geolocation and potentially in the search URL. If the websites change how pincodes are handled, this might fail, and prices might not be for the target location.
+*   **End-of-Script `ValueError` on Windows**:
+    *   You might occasionally see a `ValueError: I/O operation on closed pipe` (often related to `asyncio` `proactor_events` or `_ProactorBasePipeTransport.__del__`) in the console right as the script finishes.
+    *   This is generally a benign error related to the cleanup of background browser processes and network resources on Windows, particularly when asynchronous operations (like those in `Crawl4AI`) are involved.
+    *   If all scraping results were displayed correctly before this message, it typically does not affect the agent's functionality or the data retrieved. It can usually be safely ignored.
 
 This README should provide a solid foundation for users to understand and run the agent.
 ```
