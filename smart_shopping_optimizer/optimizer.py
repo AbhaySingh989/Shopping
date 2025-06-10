@@ -28,9 +28,11 @@ SUPPORTED_PLATFORMS = {
     "1": "Amazon.in",
     "2": "Flipkart.com",
     "3": "Zepto",
+    "4": "Swiggy Instamart",
+    "5": "Blinkit",
 }
 AVAILABLE_SCRAPERS = ["Amazon.in", "Flipkart.com"]
-EXPERIMENTAL_SCRAPERS = ["Zepto"] # Platforms for research/crawl testing
+EXPERIMENTAL_SCRAPERS = ["Zepto", "Swiggy Instamart", "Blinkit"] # Platforms for research/crawl testing
 
 class ProductInfo(BaseModel):
     title: Optional[str] = Field(default="N/A", description="Product title")
@@ -485,6 +487,246 @@ def scrape_zepto(search_query: str, pincode: str, api_key: str, original_user_qu
         print(f"Zepto (Crawl4AI): {status_message}")
         return {"title": "Error", "price": "N/A", "url": "N/A", "status": status_message}
 
+# --- Swiggy Instamart Scraper (Initial Crawl4AI Structure) ---
+async def scrape_swiggy_instamart_crawl4ai(search_query: str, pincode: str, api_key: str, original_user_query: str) -> dict:
+    print(f"Swiggy Instamart (Crawl4AI): Starting scrape for query: '{search_query}' with pincode: {pincode}")
+    # Note: Pincode is not directly used in Swiggy Instamart search URLs typically, location is handled by session/browser context.
+    # Swiggy Instamart's search URL structure might change. This is a best guess.
+    search_slug = search_query.lower().replace(' ', '-')
+    search_url = f"https://instamart.swiggy.com/search/{search_slug}" # Or potentially www.swiggy.com/instamart/search/
+    print(f"Swiggy Instamart (Crawl4AI): Target URL: {search_url}")
+
+    # Geolocation might be important for Swiggy Instamart to show relevant stores/availability
+    geo_config = GeolocationConfig(latitude=12.9716, longitude=77.5946, accuracy=1000.0) # Bangalore
+    browser_config = BrowserConfig(headless=True, verbose=True, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+    run_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, geolocation=geo_config, locale="en-IN")
+
+    print(f"Swiggy Instamart (Crawl4AI): Attempting to crawl URL: {search_url} with geolocation for Bangalore.")
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        try:
+            result = await crawler.arun(url=search_url, config=run_config)
+        except Exception as e:
+            error_str = str(e).lower()
+            playwright_help_message = "Ensure Playwright browsers are installed by running 'crawl4ai-setup' or 'python -m playwright install --with-deps chromium' in your terminal."
+            if "executable doesn't exist" in error_str or "playwright install" in error_str or "browser was not found" in error_str:
+                status_msg = f"Playwright setup needed for Crawl4AI (Swiggy Instamart). {playwright_help_message} (Error: {e})"
+            else: status_msg = f"Crawl4AI crawl error (Swiggy Instamart): {e}"
+            print(f"Swiggy Instamart (Crawl4AI): {status_msg}")
+            return {"title": "Error", "price": "N/A", "url": "N/A", "status": status_msg}
+
+    if not result or not result.success:
+        status_msg = "Crawl4AI failed to retrieve content from Swiggy Instamart."
+        if result and result.error_message: status_msg += f" Error: {result.error_message}"
+        # Check for common blocking patterns in content if available
+        if result and result.content and ("Access Denied" in result.content or "Something went wrong" in result.content or "Looks like you are lost" in result.content or "rate limit" in result.content.lower()):
+            status_msg += " (Potential block or error page detected by Swiggy Instamart)"
+        print(f"Swiggy Instamart (Crawl4AI): {status_msg}")
+        return {"title": "Not found", "price": "N/A", "url": "N/A", "status": status_msg}
+
+    if not result.markdown or not result.markdown.raw_markdown:
+        status_msg = "Crawl4AI retrieved content from Swiggy Instamart, but no Markdown was generated."
+        if result.content:
+             status_msg += " (HTML content was present but could not be converted to markdown by Crawl4AI)."
+             print(f"Swiggy Instamart (Crawl4AI): HTML content snippet (first 500 chars): {result.content[:500]}")
+        print(f"Swiggy Instamart (Crawl4AI): {status_msg}")
+        return {"title": "Not found", "price": "N/A", "url": "N/A", "status": status_msg}
+
+    print(f"Swiggy Instamart (Crawl4AI): Successfully crawled. Markdown length: {len(result.markdown.raw_markdown)}.")
+    print("Swiggy Instamart (Crawl4AI): Markdown snippet (first 1000 chars):")
+    print(result.markdown.raw_markdown[:1000]) # Log a snippet for initial review
+
+    extracted_products: List[ProductInfo] = extract_swiggy_data_gemini(result.markdown.raw_markdown, original_user_query, api_key)
+    if not extracted_products:
+        print("Swiggy Instamart (Crawl4AI->Gemini): Gemini could not extract products.")
+        return {"title": "Not found", "price": "N/A", "url": search_url, "status": "No products extracted from Swiggy Instamart by Gemini"}
+
+    for product in extracted_products:
+        if not product.title or product.title == "N/A": continue
+        print(f"Swiggy Instamart (Crawl4AI): Checking relevance for extracted product: '{product.title}'")
+        if is_product_relevant_gemini(original_user_query, product.title, api_key):
+            print(f"Swiggy Instamart (Crawl4AI): Gemini confirmed product '{product.title}' is relevant.")
+            return {"title": product.title, "price": product.price, "url": product.url, "status": "Available on Swiggy Instamart (via Crawl4AI)"}
+        else:
+            print(f"Swiggy Instamart (Crawl4AI): Product '{product.title}' NOT relevant by final Gemini check.")
+
+    print("Swiggy Instamart (Crawl4AI): No relevant products after Gemini check from extracted data.")
+    return {"title": "Not found", "price": "N/A", "url": search_url, "status": "No relevant products found on Swiggy Instamart (Crawl4AI + Gemini)"}
+
+# --- Helper function to extract Swiggy Instamart data using Gemini ---
+def extract_swiggy_data_gemini(markdown_content: str, original_query: str, api_key: str) -> List[ProductInfo]:
+    prompt = f"""
+Given the following Markdown content from a Swiggy Instamart search results page for the query '{original_query}',
+extract the product title, price, and product page URL for up to the first 3-5 relevant products.
+Ensure URLs are complete. Swiggy Instamart URLs might be relative; if so, prepend 'https://instamart.swiggy.com'.
+Present the output as a JSON list of objects, where each object has 'title', 'price', and 'url' keys.
+The price should be a string containing only numbers and possibly a decimal point (e.g., "120", "55.50"). Remove currency symbols (like ₹) and commas.
+If a value is missing for a product, use "N/A".
+
+Markdown content (first 15000 chars):
+{markdown_content[:15000]}
+"""
+    print(f"Swiggy Instamart (Crawl4AI->Gemini): Sending content to Gemini for extraction. Original Query: {original_query}")
+    response_text_for_error_log = "N/A"
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        response_text_for_error_log = response.text
+        cleaned_response_text = response.text.strip()
+        if cleaned_response_text.startswith("```json"): cleaned_response_text = cleaned_response_text[7:]
+        if cleaned_response_text.startswith("```"): cleaned_response_text = cleaned_response_text[3:]
+        if cleaned_response_text.endswith("```"): cleaned_response_text = cleaned_response_text[:-3]
+        if cleaned_response_text.startswith("`") and cleaned_response_text.endswith("`"): cleaned_response_text = cleaned_response_text[1:-1]
+        extracted_json = json.loads(cleaned_response_text)
+        # Ensure URLs are absolute
+        for item in extracted_json:
+            if 'url' in item and item['url'] != "N/A" and not item['url'].startswith('http'):
+                item['url'] = f"https://instamart.swiggy.com{item['url'] if item['url'].startswith('/') else '/' + item['url']}"
+        products = [ProductInfo(**p) for p in extracted_json]
+        print(f"Swiggy Instamart (Crawl4AI->Gemini): Successfully extracted {len(products)} products via Gemini.")
+        return products
+    except Exception as e:
+        print(f"Swiggy Instamart (Crawl4AI->Gemini): Error parsing Gemini response for data extraction: {e}. Raw response snippet: {response_text_for_error_log[:500]}")
+        return []
+
+def scrape_swiggy_instamart(search_query: str, pincode: str, api_key: str, original_user_query: str) -> dict:
+    print(f"Swiggy Instamart (Crawl4AI): Initializing async run for query '{search_query}' (original: '{original_user_query}')")
+    try:
+        return asyncio.run(scrape_swiggy_instamart_crawl4ai(search_query, pincode, api_key, original_user_query))
+    except RuntimeError as e:
+        if " asyncio.run() cannot be called from a running event loop" in str(e):
+            print("Swiggy Instamart (Crawl4AI): Detected running event loop. This script is designed for asyncio.run() from a sync context.")
+            return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"Async setup error (Swiggy Instamart): {e}"}
+        print(f"Swiggy Instamart (Crawl4AI): A RuntimeError occurred: {e}")
+        return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"Runtime error in Crawl4AI async execution (Swiggy Instamart): {e}"}
+    except Exception as e:
+        error_str = str(e).lower()
+        playwright_error_keywords = ["executable doesn't exist", "playwright install", "browser was not found", "chromium-"]
+        playwright_help_message = "Ensure Playwright browsers are installed by running 'crawl4ai-setup' or 'python -m playwright install --with-deps chromium' in your terminal."
+        if any(keyword in error_str for keyword in playwright_error_keywords):
+            status_message = f"Playwright setup needed for Crawl4AI (Swiggy Instamart). {playwright_help_message} (Error: {e})"
+        else: status_message = f"General error in Crawl4AI async execution (Swiggy Instamart): {e}"
+        print(f"Swiggy Instamart (Crawl4AI): {status_message}")
+        return {"title": "Error", "price": "N/A", "url": "N/A", "status": status_message}
+
+# --- Blinkit Scraper (Initial Crawl4AI Structure) ---
+async def scrape_blinkit_crawl4ai(search_query: str, pincode: str, api_key: str, original_user_query: str) -> dict:
+    print(f"Blinkit (Crawl4AI): Starting scrape for query: '{search_query}' with pincode: {pincode}")
+    # Blinkit's search URL might vary. Using a common pattern.
+    # Pincode is often handled by website's location services, not directly in basic search URL.
+    search_slug = search_query.lower().replace(' ', '-') # Basic slug, Blinkit might have specific slugification
+    search_url = f"https://blinkit.com/s/?q={search_slug}"
+    print(f"Blinkit (Crawl4AI): Target URL: {search_url}")
+
+    geo_config = GeolocationConfig(latitude=12.9716, longitude=77.5946, accuracy=1000.0) # Bangalore
+    browser_config = BrowserConfig(headless=True, verbose=True, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+    run_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, geolocation=geo_config, locale="en-IN")
+
+    print(f"Blinkit (Crawl4AI): Attempting to crawl URL: {search_url} with geolocation for Bangalore.")
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        try:
+            result = await crawler.arun(url=search_url, config=run_config)
+        except Exception as e:
+            error_str = str(e).lower()
+            playwright_help_message = "Ensure Playwright browsers are installed by running 'crawl4ai-setup' or 'python -m playwright install --with-deps chromium' in your terminal."
+            if "executable doesn't exist" in error_str or "playwright install" in error_str or "browser was not found" in error_str:
+                status_msg = f"Playwright setup needed for Crawl4AI (Blinkit). {playwright_help_message} (Error: {e})"
+            else: status_msg = f"Crawl4AI crawl error (Blinkit): {e}"
+            print(f"Blinkit (Crawl4AI): {status_msg}")
+            return {"title": "Error", "price": "N/A", "url": "N/A", "status": status_msg}
+
+    if not result or not result.success:
+        status_msg = "Crawl4AI failed to retrieve content from Blinkit."
+        if result and result.error_message: status_msg += f" Error: {result.error_message}"
+        if result and result.content and ("Access Denied" in result.content or "Something went wrong" in result.content or "rate limit" in result.content.lower() or "not available in your area" in result.content.lower()):
+            status_msg += " (Potential block, error page, or geo-restriction detected by Blinkit)"
+        print(f"Blinkit (Crawl4AI): {status_msg}")
+        return {"title": "Not found", "price": "N/A", "url": "N/A", "status": status_msg}
+
+    if not result.markdown or not result.markdown.raw_markdown:
+        status_msg = "Crawl4AI retrieved content from Blinkit, but no Markdown was generated."
+        if result.content:
+             status_msg += " (HTML content was present but could not be converted to markdown by Crawl4AI)."
+             print(f"Blinkit (Crawl4AI): HTML content snippet (first 500 chars): {result.content[:500]}")
+        print(f"Blinkit (Crawl4AI): {status_msg}")
+        return {"title": "Not found", "price": "N/A", "url": "N/A", "status": status_msg}
+
+    print(f"Blinkit (Crawl4AI): Successfully crawled. Markdown length: {len(result.markdown.raw_markdown)}.")
+    print("Blinkit (Crawl4AI): Markdown snippet (first 1000 chars):")
+    print(result.markdown.raw_markdown[:1000])
+
+    extracted_products: List[ProductInfo] = extract_blinkit_data_gemini(result.markdown.raw_markdown, original_user_query, api_key)
+    if not extracted_products:
+        print("Blinkit (Crawl4AI->Gemini): Gemini could not extract products.")
+        return {"title": "Not found", "price": "N/A", "url": search_url, "status": "No products extracted from Blinkit by Gemini"}
+
+    for product in extracted_products:
+        if not product.title or product.title == "N/A": continue
+        print(f"Blinkit (Crawl4AI): Checking relevance for extracted product: '{product.title}'")
+        if is_product_relevant_gemini(original_user_query, product.title, api_key):
+            print(f"Blinkit (Crawl4AI): Gemini confirmed product '{product.title}' is relevant.")
+            return {"title": product.title, "price": product.price, "url": product.url, "status": "Available on Blinkit (via Crawl4AI)"}
+        else:
+            print(f"Blinkit (Crawl4AI): Product '{product.title}' NOT relevant by final Gemini check.")
+
+    print("Blinkit (Crawl4AI): No relevant products after Gemini check from extracted data.")
+    return {"title": "Not found", "price": "N/A", "url": search_url, "status": "No relevant products found on Blinkit (Crawl4AI + Gemini)"}
+
+# --- Helper function to extract Blinkit data using Gemini ---
+def extract_blinkit_data_gemini(markdown_content: str, original_query: str, api_key: str) -> List[ProductInfo]:
+    prompt = f"""
+Given the following Markdown content from a Blinkit search results page for the query '{original_query}',
+extract the product title, price, and product page URL for up to the first 3-5 relevant products.
+Ensure URLs are complete. Blinkit URLs might be relative; if so, prepend 'https://blinkit.com'.
+Present the output as a JSON list of objects, where each object has 'title', 'price', and 'url' keys.
+The price should be a string containing only numbers and possibly a decimal point (e.g., "100", "45.50"). Remove currency symbols (like ₹) and commas.
+If a value is missing for a product, use "N/A".
+
+Markdown content (first 15000 chars):
+{markdown_content[:15000]}
+"""
+    print(f"Blinkit (Crawl4AI->Gemini): Sending content to Gemini for extraction. Original Query: {original_query}")
+    response_text_for_error_log = "N/A"
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        response_text_for_error_log = response.text
+        cleaned_response_text = response.text.strip()
+        if cleaned_response_text.startswith("```json"): cleaned_response_text = cleaned_response_text[7:]
+        if cleaned_response_text.startswith("```"): cleaned_response_text = cleaned_response_text[3:]
+        if cleaned_response_text.endswith("```"): cleaned_response_text = cleaned_response_text[:-3]
+        if cleaned_response_text.startswith("`") and cleaned_response_text.endswith("`"): cleaned_response_text = cleaned_response_text[1:-1]
+        extracted_json = json.loads(cleaned_response_text)
+        # Ensure URLs are absolute
+        for item in extracted_json:
+            if 'url' in item and item['url'] != "N/A" and not item['url'].startswith('http'):
+                item['url'] = f"https://blinkit.com{item['url'] if item['url'].startswith('/') else '/' + item['url']}"
+        products = [ProductInfo(**p) for p in extracted_json]
+        print(f"Blinkit (Crawl4AI->Gemini): Successfully extracted {len(products)} products via Gemini.")
+        return products
+    except Exception as e:
+        print(f"Blinkit (Crawl4AI->Gemini): Error parsing Gemini response for data extraction: {e}. Raw response snippet: {response_text_for_error_log[:500]}")
+        return []
+
+def scrape_blinkit(search_query: str, pincode: str, api_key: str, original_user_query: str) -> dict:
+    print(f"Blinkit (Crawl4AI): Initializing async run for query '{search_query}' (original: '{original_user_query}')")
+    try:
+        return asyncio.run(scrape_blinkit_crawl4ai(search_query, pincode, api_key, original_user_query))
+    except RuntimeError as e:
+        if " asyncio.run() cannot be called from a running event loop" in str(e):
+            print("Blinkit (Crawl4AI): Detected running event loop. This script is designed for asyncio.run() from a sync context.")
+            return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"Async setup error (Blinkit): {e}"}
+        print(f"Blinkit (Crawl4AI): A RuntimeError occurred: {e}")
+        return {"title": "Error", "price": "N/A", "url": "N/A", "status": f"Runtime error in Crawl4AI async execution (Blinkit): {e}"}
+    except Exception as e:
+        error_str = str(e).lower()
+        playwright_error_keywords = ["executable doesn't exist", "playwright install", "browser was not found", "chromium-"]
+        playwright_help_message = "Ensure Playwright browsers are installed by running 'crawl4ai-setup' or 'python -m playwright install --with-deps chromium' in your terminal."
+        if any(keyword in error_str for keyword in playwright_error_keywords):
+            status_message = f"Playwright setup needed for Crawl4AI (Blinkit). {playwright_help_message} (Error: {e})"
+        else: status_message = f"General error in Crawl4AI async execution (Blinkit): {e}"
+        print(f"Blinkit (Crawl4AI): {status_message}")
+        return {"title": "Error", "price": "N/A", "url": "N/A", "status": status_message}
+
 # --- Output Presentation ---
 def parse_price(price_str: str) -> Optional[float]:
     if price_str is None or price_str == "N/A": return None
@@ -505,6 +747,8 @@ def display_results(user_query: str, results_by_platform: dict):
     amazon_data = results_by_platform.get("Amazon.in", {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"})
     flipkart_data = results_by_platform.get("Flipkart.com", {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"})
     zepto_data = results_by_platform.get("Zepto", {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"})
+    swiggy_data = results_by_platform.get("Swiggy Instamart", {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"})
+    blinkit_data = results_by_platform.get("Blinkit", {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"})
 
 
     print("Amazon.in:")
@@ -524,14 +768,28 @@ def display_results(user_query: str, results_by_platform: dict):
     print(f"  Price: {zepto_data.get('price', 'N/A')}")
     print(f"  Link: {zepto_data.get('url', 'N/A')}")
     print(f"  Status: {zepto_data.get('status', 'N/A')}\n")
+    print("---")
+    print("Swiggy Instamart:")
+    print(f"  Product: {swiggy_data.get('title', 'N/A')}")
+    print(f"  Price: {swiggy_data.get('price', 'N/A')}")
+    print(f"  Link: {swiggy_data.get('url', 'N/A')}")
+    print(f"  Status: {swiggy_data.get('status', 'N/A')}\n")
+    print("---")
+    print("Blinkit:")
+    print(f"  Product: {blinkit_data.get('title', 'N/A')}")
+    print(f"  Price: {blinkit_data.get('price', 'N/A')}")
+    print(f"  Link: {blinkit_data.get('url', 'N/A')}")
+    print(f"  Status: {blinkit_data.get('status', 'N/A')}\n")
 
     amazon_price_str = amazon_data.get("price", "N/A")
     flipkart_price_str = flipkart_data.get("price", "N/A")
-    # Zepto price not used in recommendation yet as it's experimental / crawl-only
+    # Zepto, Swiggy Instamart & Blinkit prices not used in recommendation yet as they are experimental / crawl-only
 
     amazon_status = amazon_data.get("status", "Status N/A")
     flipkart_status = flipkart_data.get("status", "Status N/A")
     zepto_status = zepto_data.get("status", "Status N/A")
+    swiggy_status = swiggy_data.get("status", "Status N/A")
+    blinkit_status = blinkit_data.get("status", "Status N/A")
 
     amazon_price_float = parse_price(amazon_price_str)
     flipkart_price_float = parse_price(flipkart_price_str)
@@ -555,6 +813,12 @@ def display_results(user_query: str, results_by_platform: dict):
     # Add Zepto status to recommendation string if it was queried
     if "Not Selected" not in zepto_status and "Not Scraped" not in zepto_status :
         recommendation += f" Zepto Status: {zepto_status}."
+    # Add Swiggy Instamart status to recommendation string if it was queried
+    if "Not Selected" not in swiggy_status and "Not Scraped" not in swiggy_status :
+        recommendation += f" Swiggy Instamart Status: {swiggy_status}."
+    # Add Blinkit status to recommendation string if it was queried
+    if "Not Selected" not in blinkit_status and "Not Scraped" not in blinkit_status :
+        recommendation += f" Blinkit Status: {blinkit_status}."
 
 
     print("---")
@@ -570,7 +834,9 @@ if __name__ == "__main__":
     platform_results = {
         "Amazon.in": {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"},
         "Flipkart.com": {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"},
-        "Zepto": {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"}
+        "Zepto": {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"},
+        "Swiggy Instamart": {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"},
+        "Blinkit": {"status": "Not Selected", "title": "N/A", "price": "N/A", "url": "N/A"}
     }
     user_query_main = ""
     try:
@@ -595,6 +861,16 @@ if __name__ == "__main__":
         if "Zepto" in selected_platforms: # Add Zepto call
             print(f"Attempting to scrape Zepto for '{standardized_query}' with pincode {default_pincode}...")
             platform_results["Zepto"] = scrape_zepto(standardized_query, default_pincode, api_key, user_query_main)
+            print("-" * 30)
+
+        if "Swiggy Instamart" in selected_platforms:
+            print(f"Attempting to scrape Swiggy Instamart for '{standardized_query}' with pincode {default_pincode}...")
+            platform_results["Swiggy Instamart"] = scrape_swiggy_instamart(standardized_query, default_pincode, api_key, user_query_main)
+            print("-" * 30)
+
+        if "Blinkit" in selected_platforms:
+            print(f"Attempting to scrape Blinkit for '{standardized_query}' with pincode {default_pincode}...")
+            platform_results["Blinkit"] = scrape_blinkit(standardized_query, default_pincode, api_key, user_query_main)
             print("-" * 30)
 
     except ValueError as e: print(f"Configuration Error: {e}")
